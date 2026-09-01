@@ -1,5 +1,27 @@
-import { useState, useRef } from "react";
-import * as XLSX from "xlsx";
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Importacao de Servicos — Calculadora Tributaria</title>
+<!-- React 18 -->
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<!-- Babel standalone (transpila JSX no browser) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<!-- SheetJS (Excel) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; min-height: 100vh; }
+  input, select, button { font-family: inherit; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useRef } = React;
 
 // ═══════════════════════════════════════════════════════════
 // MODULO TRIBUTARIO — editar apenas este bloco para aliquotas
@@ -40,55 +62,35 @@ const _15T = [
 const _15S = ["Estados Unidos","Reino Unido","Australia","Irlanda"];
 
 const PAISES = [
-  ..._FAV.map(function(n){ return { n:n, alf:0.25, fav:true,  trat: n==="Cingapura" }; }),
-  ..._15T.map(function(n){ return { n:n, alf:0.15, fav:false, trat: true  }; }),
-  ..._15S.map(function(n){ return { n:n, alf:0.15, fav:false, trat: false }; }),
+  ..._FAV.map(n => ({ n, alf:0.25, fav:true,  trat: n==="Cingapura" })),
+  ..._15T.map(n => ({ n, alf:0.15, fav:false, trat: true  })),
+  ..._15S.map(n => ({ n, alf:0.15, fav:false, trat: false })),
   { n:"Demais paises (regra residual)", alf:0.15, fav:false, trat:false, res:true },
-].sort(function(a,b){ return a.n.localeCompare(b.n,"pt-BR"); });
+].sort((a,b) => a.n.localeCompare(b.n,"pt-BR"));
 
 // ═══════════════════════════════════════════════════════════
 // ENGINE DE CALCULO
 // ═══════════════════════════════════════════════════════════
 function calcular(params) {
-  var valorFX    = params.valorFX;
-  var cotInv     = params.cotInv;
-  var cotIRRF    = params.cotIRRF;
-  var pais       = params.pais;
-  var alfISS     = params.alfISS;
-  var cide       = params.cide;
-  var grossUp    = params.grossUp;
-  var parecer2026 = params.parecer2026;
-
-  var brl  = valorFX * cotInv;
-  var brlI = valorFX * cotIRRF;
-  var pi   = PAISES.find(function(x){ return x.n === pais; }) || PAISES.find(function(x){ return x.res; });
-  var alfI = pi.alf;
-
-  // Base IRRF: gross-up quando tomador assume o onus (contrato a beneficio liquido)
-  var baseI = grossUp ? brlI / (1 - alfI) : brlI;
-
-  // Aliquota combinada PIS+COFINS
-  var alfPC = TRIB.PIS.alf + TRIB.COFINS.alf; // 0.0165 + 0.0760 = 0.0925
-
-  // Base PIS/COFINS:
-  //   parecer2026 = true  (Parecer SEI/MF 1.129/2026, fatos >= 09/06/2026):
-  //     base = valor antes IRRF — sem acrescimo das proprias contribuicoes (fator Z nao aplicavel)
-  //   parecer2026 = false (IN RFB 2.121/2022 art. 273, fatos < 09/06/2026):
-  //     base = valor antes IRRF / (1 - alfPC) — calculo "por dentro"
-  var basePC = parecer2026 ? baseI : (baseI / (1 - alfPC));
-
-  var leiPC = parecer2026
+  const { valorFX, cotInv, cotIRRF, pais, alfISS, cide, grossUp, parecer2026 } = params;
+  const brl  = valorFX * cotInv;
+  const brlI = valorFX * cotIRRF;
+  const pi   = PAISES.find(x => x.n === pais) || PAISES.find(x => x.res);
+  const alfI = pi.alf;
+  const baseI = grossUp ? brlI / (1 - alfI) : brlI;
+  const alfPC = TRIB.PIS.alf + TRIB.COFINS.alf; // 0.0925
+  const basePC = parecer2026 ? baseI : baseI / (1 - alfPC);
+  const leiPC = parecer2026
     ? "Lei 10.865/2004 art. 7, II; Parecer SEI/MF 1.129/2026"
     : "Lei 10.865/2004 art. 7, II; IN RFB 2.121/2022 art. 273";
-
-  var r = {
-    meta: { brl:brl, brlI:brlI, pi:pi, grossUp:grossUp, baseI:baseI, basePC:basePC, alfPC:alfPC, parecer2026:parecer2026 },
-    ISS:    { base:brl,    alf:alfISS/100,             val:brl*(alfISS/100),              darf:TRIB.ISS.darf,    lei:TRIB.ISS.lei    },
-    PIS:    { base:basePC, alf:TRIB.PIS.alf,            val:basePC*TRIB.PIS.alf,           darf:TRIB.PIS.darf,    lei:leiPC           },
-    COFINS: { base:basePC, alf:TRIB.COFINS.alf,         val:basePC*TRIB.COFINS.alf,        darf:TRIB.COFINS.darf, lei:leiPC           },
-    IOF:    { base:brl,    alf:TRIB.IOF.alf,            val:brl*TRIB.IOF.alf,              darf:TRIB.IOF.darf,    lei:TRIB.IOF.lei    },
-    CIDE:   { base:brl,    alf:cide?TRIB.CIDE.alf:0,   val:cide?brl*TRIB.CIDE.alf:0,     darf:TRIB.CIDE.darf,   lei:TRIB.CIDE.lei,  ni:!cide },
-    IRRF:   { base:baseI,  alf:alfI,                    val:baseI*alfI,                     darf:TRIB.IRRF.darf,   lei:TRIB.IRRF.lei   },
+  const r = {
+    meta: { brl, brlI, pi, grossUp, baseI, basePC, alfPC, parecer2026 },
+    ISS:    { base:brl,    alf:alfISS/100,           val:brl*(alfISS/100),              darf:TRIB.ISS.darf,    lei:TRIB.ISS.lei    },
+    PIS:    { base:basePC, alf:TRIB.PIS.alf,          val:basePC*TRIB.PIS.alf,           darf:TRIB.PIS.darf,    lei:leiPC           },
+    COFINS: { base:basePC, alf:TRIB.COFINS.alf,       val:basePC*TRIB.COFINS.alf,        darf:TRIB.COFINS.darf, lei:leiPC           },
+    IOF:    { base:brl,    alf:TRIB.IOF.alf,          val:brl*TRIB.IOF.alf,              darf:TRIB.IOF.darf,    lei:TRIB.IOF.lei    },
+    CIDE:   { base:baseI,  alf:cide?TRIB.CIDE.alf:0,  val:cide?baseI*TRIB.CIDE.alf:0,   darf:TRIB.CIDE.darf,   lei:TRIB.CIDE.lei,  ni:!cide },
+    IRRF:   { base:baseI,  alf:alfI,                  val:baseI*alfI,                     darf:TRIB.IRRF.darf,   lei:TRIB.IRRF.lei   },
   };
   r.total = r.ISS.val + r.PIS.val + r.COFINS.val + r.IOF.val + r.CIDE.val + r.IRRF.val;
   return r;
@@ -97,58 +99,55 @@ function calcular(params) {
 // ═══════════════════════════════════════════════════════════
 // FORMATADORES
 // ═══════════════════════════════════════════════════════════
-var fBRL = function(v) { if (v == null || isNaN(+v)) return "--"; return (+v).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); };
-var fPCT = function(v) { return (v*100).toFixed(2).replace(".",",")+"%"; };
-var fN4  = function(v) { return (+v).toFixed(4).replace(".",","); };
+const fBRL = v => (v == null || isNaN(+v)) ? "--" : (+v).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const fPCT = v => (v*100).toFixed(2).replace(".",",")+"%";
+const fN4  = v => (+v).toFixed(4).replace(".",",");
 
 // ═══════════════════════════════════════════════════════════
 // ESTILOS BASE
 // ═══════════════════════════════════════════════════════════
-var sInp    = { width:"100%", boxSizing:"border-box", padding:"8px 10px", border:"1px solid #d1d5db", borderRadius:6, fontSize:13, fontFamily:"inherit", outline:"none" };
-var sSel    = { width:"100%", boxSizing:"border-box", padding:"8px 10px", border:"1px solid #d1d5db", borderRadius:6, fontSize:13, fontFamily:"inherit", outline:"none", background:"#fff" };
-var sInpErr = { width:"100%", boxSizing:"border-box", padding:"8px 10px", border:"1px solid #ef4444", borderRadius:6, fontSize:13, fontFamily:"inherit", outline:"none" };
-function sBtn(bg, extra) {
-  var base = { padding:"9px 16px", background:bg||"#2563eb", color:"#fff", border:"none", borderRadius:7, fontSize:13, fontWeight:600, cursor:"pointer" };
-  return extra ? Object.assign({}, base, extra) : base;
-}
+const sInp    = { width:"100%", padding:"8px 10px", border:"1px solid #d1d5db", borderRadius:6, fontSize:13, outline:"none" };
+const sSel    = { width:"100%", padding:"8px 10px", border:"1px solid #d1d5db", borderRadius:6, fontSize:13, outline:"none", background:"#fff" };
+const sInpErr = { width:"100%", padding:"8px 10px", border:"1px solid #ef4444", borderRadius:6, fontSize:13, outline:"none" };
+const sBtn = (bg, extra) => Object.assign({ padding:"9px 16px", background:bg||"#2563eb", color:"#fff", border:"none", borderRadius:7, fontSize:13, fontWeight:600, cursor:"pointer" }, extra||{});
 
 // ═══════════════════════════════════════════════════════════
 // COMPONENTES BASE
 // ═══════════════════════════════════════════════════════════
-function Field(props) {
+function Field({ label, hint, err, children }) {
   return (
     <div style={{marginBottom:12}}>
-      <label style={{display:"block",fontSize:11.5,fontWeight:600,color:"#374151",marginBottom:3}}>{props.label}</label>
-      {props.children}
-      {props.err  && <span style={{fontSize:11,color:"#ef4444",display:"block",marginTop:2}}>{props.err}</span>}
-      {props.hint && !props.err && <span style={{fontSize:10.5,color:"#9ca3af",display:"block",marginTop:2}}>{props.hint}</span>}
+      <label style={{display:"block",fontSize:11.5,fontWeight:600,color:"#374151",marginBottom:3}}>{label}</label>
+      {children}
+      {err  && <span style={{fontSize:11,color:"#ef4444",display:"block",marginTop:2}}>{err}</span>}
+      {hint && !err && <span style={{fontSize:10.5,color:"#9ca3af",display:"block",marginTop:2}}>{hint}</span>}
     </div>
   );
 }
 
-function Toggle(props) {
+function Toggle({ label, hint, checked, onChange, bold }) {
   return (
     <div style={{marginBottom:4}}>
-      <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",userSelect:"none"}} onClick={props.onChange}>
-        <div style={{width:38,height:20,borderRadius:10,background:props.checked?"#2563eb":"#d1d5db",position:"relative",transition:"background .2s",flexShrink:0}}>
-          <div style={{position:"absolute",top:2,left:props.checked?18:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.25)"}}/>
+      <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",userSelect:"none"}} onClick={onChange}>
+        <div style={{width:38,height:20,borderRadius:10,background:checked?"#2563eb":"#d1d5db",position:"relative",transition:"background .2s",flexShrink:0}}>
+          <div style={{position:"absolute",top:2,left:checked?18:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 3px rgba(0,0,0,.25)"}}/>
         </div>
-        <span style={{fontSize:13,color:"#374151",fontWeight:props.bold?600:400}}>{props.label}</span>
+        <span style={{fontSize:13,color:"#374151",fontWeight:bold?600:400}}>{label}</span>
       </label>
-      {props.hint && <p style={{margin:"2px 0 0 46px",fontSize:11,color:"#6b7280"}}>{props.hint}</p>}
+      {hint && <p style={{margin:"2px 0 0 46px",fontSize:11,color:"#6b7280"}}>{hint}</p>}
     </div>
   );
 }
 
-function TRow(props) {
+function TRow({ nome, base, alf, val, darf, lei, ni, hl }) {
   return (
-    <tr style={{background:props.hl?"#eff6ff":"inherit",opacity:props.ni?0.5:1}}>
-      <td style={{padding:"8px 10px",fontSize:12,fontWeight:props.hl?700:500,color:props.hl?"#1d4ed8":"#111"}}>{props.nome}</td>
-      <td style={{padding:"8px 10px",fontSize:12,textAlign:"right"}}>{fBRL(props.base)}</td>
-      <td style={{padding:"8px 10px",fontSize:12,textAlign:"center"}}>{props.ni?"--":fPCT(props.alf)}</td>
-      <td style={{padding:"8px 10px",fontSize:12,textAlign:"right",fontWeight:600}}>{props.ni?"Nao incide":fBRL(props.val)}</td>
-      <td style={{padding:"8px 10px",fontSize:11,textAlign:"center",color:"#6b7280",fontFamily:"monospace"}}>{props.darf}</td>
-      <td style={{padding:"8px 10px",fontSize:10,color:"#9ca3af",maxWidth:180,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{props.lei}</td>
+    <tr style={{background:hl?"#eff6ff":"inherit",opacity:ni?0.5:1}}>
+      <td style={{padding:"8px 10px",fontSize:12,fontWeight:hl?700:500,color:hl?"#1d4ed8":"#111"}}>{nome}</td>
+      <td style={{padding:"8px 10px",fontSize:12,textAlign:"right"}}>{fBRL(base)}</td>
+      <td style={{padding:"8px 10px",fontSize:12,textAlign:"center"}}>{ni?"--":fPCT(alf)}</td>
+      <td style={{padding:"8px 10px",fontSize:12,textAlign:"right",fontWeight:600}}>{ni?"Nao incide":fBRL(val)}</td>
+      <td style={{padding:"8px 10px",fontSize:11,textAlign:"center",color:"#6b7280",fontFamily:"monospace"}}>{darf}</td>
+      <td style={{padding:"8px 10px",fontSize:10,color:"#9ca3af",maxWidth:180,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{lei}</td>
     </tr>
   );
 }
@@ -156,61 +155,46 @@ function TRow(props) {
 // ═══════════════════════════════════════════════════════════
 // TAB CALCULADORA
 // ═══════════════════════════════════════════════════════════
-function TabCalc(props) {
-  var form = props.form, setForm = props.setForm, res = props.res, setRes = props.setRes;
-  var showMemArr = useState(false);
-  var showMem = showMemArr[0], setShowMem = showMemArr[1];
-  var errsArr = useState({});
-  var errs = errsArr[0], setErrs = errsArr[1];
+function TabCalc({ form, setForm, res, setRes }) {
+  const [showMem, setShowMem] = useState(false);
+  const [errs, setErrs]       = useState({});
 
-  function set(k, v) {
-    setForm(function(f) {
-      var n = Object.assign({}, f, {[k]: v});
-      if (k === "cotInv" && !f._irrfM) n.cotIRRF = v;
-      return n;
-    });
-  }
+  const set = (k, v) => setForm(f => {
+    const n = {...f, [k]: v};
+    if (k === "cotInv" && !f._irrfM) n.cotIRRF = v;
+    return n;
+  });
 
-  function validate() {
-    var e = {};
+  const validate = () => {
+    const e = {};
     if (!form.val || isNaN(form.val) || +form.val <= 0)          e.val = "Informe um valor maior que zero";
     if (!form.cotInv || isNaN(form.cotInv) || +form.cotInv <= 0) e.ci  = "Cotacao invalida";
     if (+form.alfISS < 0 || +form.alfISS > 10)                   e.iss = "Entre 0 e 10%";
     setErrs(e);
-    return Object.keys(e).length === 0;
-  }
+    return !Object.keys(e).length;
+  };
 
-  function onCalc() {
+  const onCalc = () => {
     if (!validate()) return;
     setRes(calcular({
-      valorFX:     +form.val,
-      cotInv:      +form.cotInv,
-      cotIRRF:     +(form.cotIRRF || form.cotInv),
-      pais:        form.pais,
-      alfISS:      +form.alfISS,
-      cide:        form.cide,
-      grossUp:     form.grossUp,
+      valorFX: +form.val, cotInv: +form.cotInv,
+      cotIRRF: +(form.cotIRRF || form.cotInv),
+      pais: form.pais, alfISS: +form.alfISS,
+      cide: form.cide, grossUp: form.grossUp,
       parecer2026: form.parecer2026,
     }));
     setShowMem(false);
-  }
+  };
 
-  var pi = PAISES.find(function(x){ return x.n === form.pais; });
+  const pi = PAISES.find(x => x.n === form.pais);
 
-  function gerarPDF() {
+  const gerarPDF = () => {
     if (!res) return;
-    var dataStr = new Date().toLocaleDateString("pt-BR");
-    var parecerLabel = res.meta.parecer2026
-      ? "Parecer SEI/MF 1.129/2026 (fatos a partir de 09/06/2026)"
-      : "IN RFB 2.121/2022 art. 273 (Parecer SEI 4.891/2022)";
-    var formulaPC = res.meta.parecer2026
-      ? "base PIS/COFINS = valor antes IRRF (sem fator Z)"
-      : "base PIS/COFINS = valor antes IRRF / (1 - 9,25%) = valor antes IRRF / 0,9075";
-    var notaPC = res.meta.parecer2026
+    const dataStr = new Date().toLocaleDateString("pt-BR");
+    const notaPC = res.meta.parecer2026
       ? "Base PIS/COFINS calculada conforme Parecer SEI/MF n. 1.129/2026: para fatos geradores a partir de 09/06/2026, nao integram a base de calculo o valor das proprias contribuicoes (fator Z nao aplicavel). Base = valor antes retencao IRRF."
-      : "Base PIS/COFINS calculada conforme art. 273 da IN RFB 2.121/2022 (Parecer SEI n. 4.891/2022 e Despacho n. 378/PGFN-ME): valor pago/remetido ao exterior antes da retencao do IRRF, acrescido das proprias contribuicoes. Formula: base = valor antes IRRF / (1 - 9,25%).";
-
-    var tributos = [
+      : "Base PIS/COFINS calculada conforme art. 273 da IN RFB 2.121/2022 (Parecer SEI n. 4.891/2022): valor pago/remetido ao exterior antes da retencao do IRRF, acrescido das proprias contribuicoes. Formula: base = valor antes IRRF / (1 - 9,25%).";
+    const tributos = [
       { nome:"ISSQN",             r:res.ISS,    ni:false,       hl:false },
       { nome:"PIS-Importacao",    r:res.PIS,    ni:false,       hl:false },
       { nome:"COFINS-Importacao", r:res.COFINS, ni:false,       hl:false },
@@ -218,99 +202,97 @@ function TabCalc(props) {
       { nome:"CIDE-Tecnologia",   r:res.CIDE,   ni:res.CIDE.ni, hl:false },
       { nome:"IRRF",              r:res.IRRF,   ni:false,       hl:true  },
     ];
-    var tribHTML = tributos.map(function(t) {
-      return "<tr style='background:" + (t.hl?"#eff6ff":"white") + ";opacity:" + (t.ni?"0.6":"1") + "'>" +
-        "<td style='padding:6px 8px;font-size:11px;font-weight:" + (t.hl?"700":"500") + ";color:" + (t.hl?"#1d4ed8":"#111") + "'>" + t.nome + "</td>" +
-        "<td style='padding:6px 8px;font-size:11px;text-align:right'>" + fBRL(t.r.base) + "</td>" +
-        "<td style='padding:6px 8px;font-size:11px;text-align:center'>" + (t.ni?"--":fPCT(t.r.alf)) + "</td>" +
-        "<td style='padding:6px 8px;font-size:11px;text-align:right;font-weight:600'>" + (t.ni?"Nao incide":fBRL(t.r.val)) + "</td>" +
-        "<td style='padding:6px 8px;font-size:11px;text-align:center;font-family:monospace;color:#6b7280'>" + t.r.darf + "</td>" +
-        "<td style='padding:6px 8px;font-size:10px;color:#9ca3af'>" + t.r.lei + "</td>" +
-        "</tr>";
-    }).join("");
-
-    var memItens = [
-      ["Valor da Invoice",                        form.val + " " + form.moeda],
-      ["Cotacao Invoice",                          "R$ " + fN4(form.cotInv)],
-      ["Cotacao IRRF",                             "R$ " + fN4(form.cotIRRF || form.cotInv)],
-      ["Base BRL (invoice x cotacao invoice)",     fBRL(res.meta.brl)],
-      ["Base BRL IRRF (invoice x cot. IRRF)",      fBRL(res.meta.brlI)],
-      ["Base IRRF / valor antes retencao",         res.meta.grossUp
-        ? fBRL(res.meta.brlI) + " / (1 - " + fPCT(res.meta.pi.alf) + ") = " + fBRL(res.meta.baseI) + "  [Gross Up]"
-        : fBRL(res.meta.baseI) + "  [sem Gross Up]"],
-      ["Regra base PIS/COFINS",                    parecerLabel],
-      ["Base PIS/COFINS",                          res.meta.parecer2026
-        ? fBRL(res.meta.basePC) + "  [= valor antes IRRF, sem fator Z]"
-        : fBRL(res.meta.basePC) + "  [= " + fBRL(res.meta.baseI) + " / 0,9075]"],
-      ["Pais / Aliquota IRRF",                     res.meta.pi.n + " -- " + fPCT(res.meta.pi.alf)],
-      ["Tributacao favorecida",                    res.meta.pi.fav ? "Sim (IN RFB 1.037/2010)" : "Nao"],
-      ["Tratado internacional",                    res.meta.pi.trat ? "Sim -- em vigor" : "Nao aplicavel"],
+    const tribHTML = tributos.map(t =>
+      `<tr style="background:${t.hl?"#eff6ff":"white"};opacity:${t.ni?0.6:1}">
+        <td style="padding:6px 8px;font-size:11px;font-weight:${t.hl?700:500};color:${t.hl?"#1d4ed8":"#111"}">${t.nome}</td>
+        <td style="padding:6px 8px;font-size:11px;text-align:right">${fBRL(t.r.base)}</td>
+        <td style="padding:6px 8px;font-size:11px;text-align:center">${t.ni?"--":fPCT(t.r.alf)}</td>
+        <td style="padding:6px 8px;font-size:11px;text-align:right;font-weight:600">${t.ni?"Nao incide":fBRL(t.r.val)}</td>
+        <td style="padding:6px 8px;font-size:11px;text-align:center;font-family:monospace;color:#6b7280">${t.r.darf}</td>
+        <td style="padding:6px 8px;font-size:10px;color:#9ca3af">${t.r.lei}</td>
+      </tr>`
+    ).join("");
+    const memItens = [
+      ["Valor da Invoice",                       form.val+" "+form.moeda],
+      ["Cotacao Invoice",                         "R$ "+fN4(form.cotInv)],
+      ["Cotacao IRRF",                            "R$ "+fN4(form.cotIRRF||form.cotInv)],
+      ["Base BRL (invoice x cot. invoice)",      fBRL(res.meta.brl)],
+      ["Base BRL IRRF (invoice x cot. IRRF)",    fBRL(res.meta.brlI)],
+      ["Base IRRF / valor antes retencao",       res.meta.grossUp
+        ? fBRL(res.meta.brlI)+" / (1 - "+fPCT(res.meta.pi.alf)+") = "+fBRL(res.meta.baseI)
+        : fBRL(res.meta.baseI)+"  (sem gross up)"],
+      ["Regra base PIS/COFINS",                  res.meta.parecer2026?"Parecer SEI/MF 1.129/2026 (sem fator Z)":"IN 2.121/2022 art. 273 (com fator Z)"],
+      ["Base PIS/COFINS",                        res.meta.parecer2026
+        ? fBRL(res.meta.basePC)+"  [= valor antes IRRF]"
+        : fBRL(res.meta.basePC)+"  [= "+fBRL(res.meta.baseI)+" / 0,9075]"],
+      ["Pais / Aliquota IRRF",                   res.meta.pi.n+" -- "+fPCT(res.meta.pi.alf)],
+      ["Tributacao favorecida",                  res.meta.pi.fav?"Sim (IN RFB 1.037/2010)":"Nao"],
+      ["Tratado internacional",                  res.meta.pi.trat?"Sim -- em vigor":"Nao aplicavel"],
       ["sep"],
-      ["ISSQN",   fBRL(res.ISS.base) + " x " + fPCT(res.ISS.alf) + " = " + fBRL(res.ISS.val)],
-      ["PIS",     fBRL(res.PIS.base) + " x " + fPCT(TRIB.PIS.alf) + " = " + fBRL(res.PIS.val)],
-      ["COFINS",  fBRL(res.COFINS.base) + " x " + fPCT(TRIB.COFINS.alf) + " = " + fBRL(res.COFINS.val)],
-      ["IOF",     fBRL(res.IOF.base) + " x " + fPCT(TRIB.IOF.alf) + " = " + fBRL(res.IOF.val)],
-      ["CIDE",    res.CIDE.ni ? "Nao incide" : fBRL(res.CIDE.base) + " x " + fPCT(TRIB.CIDE.alf) + " = " + fBRL(res.CIDE.val)],
-      ["IRRF",    fBRL(res.IRRF.base) + " x " + fPCT(res.IRRF.alf) + " = " + fBRL(res.IRRF.val)],
+      ["ISSQN",   fBRL(res.ISS.base)+" x "+fPCT(res.ISS.alf)+" = "+fBRL(res.ISS.val)],
+      ["PIS",     fBRL(res.PIS.base)+" x "+fPCT(TRIB.PIS.alf)+" = "+fBRL(res.PIS.val)],
+      ["COFINS",  fBRL(res.COFINS.base)+" x "+fPCT(TRIB.COFINS.alf)+" = "+fBRL(res.COFINS.val)],
+      ["IOF",     fBRL(res.IOF.base)+" x "+fPCT(TRIB.IOF.alf)+" = "+fBRL(res.IOF.val)],
+      ["CIDE",    res.CIDE.ni?"Nao incide":fBRL(res.CIDE.base)+" x "+fPCT(TRIB.CIDE.alf)+" = "+fBRL(res.CIDE.val)],
+      ["IRRF",    fBRL(res.IRRF.base)+" x "+fPCT(res.IRRF.alf)+" = "+fBRL(res.IRRF.val)],
       ["sep"],
       ["TOTAL TRIBUTOS", fBRL(res.total)],
     ];
-    var memHTML = memItens.map(function(item) {
-      if (item[0] === "sep") return "<tr><td colspan='2' style='border-top:2px solid #e5e7eb;padding:0;height:3px;'></td></tr>";
-      var isTotal = item[0] === "TOTAL TRIBUTOS";
-      return "<tr style='background:" + (isTotal?"#eff6ff":"white") + "'>" +
-        "<td style='padding:5px 8px;font-size:11px;color:#6b7280;font-weight:" + (isTotal?"700":"400") + ";width:42%'>" + item[0] + "</td>" +
-        "<td style='padding:5px 8px;font-size:11px;font-family:monospace;font-weight:" + (isTotal?"700":"400") + ";color:" + (isTotal?"#1d4ed8":"#111") + "'>" + (item[1]||"") + "</td>" +
-        "</tr>";
+    const memHTML = memItens.map((item,i) => {
+      if (item[0]==="sep") return `<tr><td colspan="2" style="border-top:2px solid #e5e7eb;padding:0;height:3px;"></td></tr>`;
+      const isTotal = item[0]==="TOTAL TRIBUTOS";
+      return `<tr style="background:${isTotal?"#eff6ff":"white"}">
+        <td style="padding:5px 8px;font-size:11px;color:#6b7280;font-weight:${isTotal?700:400};width:42%">${item[0]}</td>
+        <td style="padding:5px 8px;font-size:11px;font-family:monospace;font-weight:${isTotal?700:400};color:${isTotal?"#1d4ed8":"#111"}">${item[1]||""}</td>
+      </tr>`;
     }).join("");
-
-    var noteColor = res.meta.parecer2026 ? "#166534" : "#1d4ed8";
-    var noteBg    = res.meta.parecer2026 ? "#f0fdf4" : "#eff6ff";
-    var noteBord  = res.meta.parecer2026 ? "#22c55e" : "#3b82f6";
-
-    var html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Calculo Importacao Servicos</title>" +
-      "<style>body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:24px;color:#111;font-size:12px;}" +
-      "h1{margin:0 0 2px;font-size:17px;color:#1e3a5f;font-weight:800;}" +
-      "h2{margin:18px 0 6px;font-size:12px;color:#1e3a5f;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #1e3a5f;padding-bottom:3px;}" +
-      "table{width:100%;border-collapse:collapse;margin-bottom:6px;}" +
-      "th{background:#1e3a5f;color:#fff;padding:6px 8px;font-size:10px;font-weight:600;text-align:left;}" +
-      "tbody tr:nth-child(even){background:#f9fafb;}" +
-      ".info{display:flex;flex-wrap:wrap;gap:10px 18px;margin:8px 0 12px;padding:8px 12px;background:#eff6ff;border-radius:5px;font-size:10px;}" +
-      ".note{font-size:9.5px;padding:5px 10px;border-left:3px solid "+noteBord+";margin-top:6px;line-height:1.5;color:"+noteColor+";background:"+noteBg+";}" +
-      ".foot{margin-top:20px;font-size:8.5px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:6px;}" +
-      "@media print{body{padding:0;}@page{margin:1.5cm;size:A4;}}</style></head><body>" +
-      "<h1>Importacao de Servicos -- Calculo Tributario</h1>" +
-      "<div style='font-size:9px;color:#9ca3af;margin-bottom:4px;'>Gerado em " + dataStr + "</div>" +
-      "<div class='info'>" +
-      (form.desc ? "<span><b>Ref.:</b> " + form.desc + "</span>" : "") +
-      "<span><b>Invoice:</b> " + form.val + " " + form.moeda + "</span>" +
-      "<span><b>Cot. Invoice:</b> R$ " + fN4(form.cotInv) + "</span>" +
-      "<span><b>Cot. IRRF:</b> R$ " + fN4(form.cotIRRF || form.cotInv) + "</span>" +
-      "<span><b>Base BRL:</b> " + fBRL(res.meta.brl) + "</span>" +
-      "<span><b>Pais:</b> " + form.pais + "</span>" +
-      (res.meta.pi.fav ? "<span style='color:#b45309;font-weight:700'>Trib. Favorecida 25%</span>" : "") +
-      (res.meta.grossUp ? "<span style='color:#6b21a8;font-weight:700'>Gross Up IRRF</span>" : "") +
-      "<span style='color:" + noteColor + ";font-weight:700'>" + (res.meta.parecer2026 ? "Parecer SEI/MF 1.129/2026" : "IN 2.121/2022 art. 273") + "</span>" +
-      "</div>" +
-      "<h2>Tributos Apurados</h2>" +
-      "<table><thead><tr>" +
-      "<th>Tributo</th><th style='text-align:right'>Base de Calculo</th><th style='text-align:center'>Aliquota</th>" +
-      "<th style='text-align:right'>Valor Devido</th><th style='text-align:center'>DARF</th><th>Base Legal</th>" +
-      "</tr></thead><tbody>" + tribHTML + "</tbody>" +
-      "<tfoot><tr style='background:#f0f9ff;border-top:2px solid #2563eb;'>" +
-      "<td colspan='3' style='padding:7px 8px;font-weight:700;font-size:12px;'>Total de Tributos</td>" +
-      "<td style='padding:7px 8px;font-weight:800;font-size:14px;text-align:right;color:#1d4ed8;'>" + fBRL(res.total) + "</td>" +
-      "<td colspan='2'></td></tr></tfoot></table>" +
-      "<div class='note'>" + notaPC + "</div>" +
-      "<h2>Memoria de Calculo</h2>" +
-      "<table><thead><tr><th style='width:42%'>Descricao</th><th>Valor / Formula</th></tr></thead>" +
-      "<tbody>" + memHTML + "</tbody></table>" +
-      "<div class='foot'>Ferramenta auxiliar -- consulte um contador ou advogado tributarista para casos especificos. | Aliquotas: PIS 1,65% / COFINS 7,60% / IOF 0,38% / CIDE 10% / IRRF conforme pais.</div>" +
-      "</body></html>";
-
-    var w = window.open("", "_blank");
-    if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(function(){ w.print(); }, 600); }
-  }
+    const noteColor = res.meta.parecer2026?"#166534":"#1d4ed8";
+    const noteBg    = res.meta.parecer2026?"#f0fdf4":"#eff6ff";
+    const noteBord  = res.meta.parecer2026?"#22c55e":"#3b82f6";
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Calculo Importacao Servicos</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:24px;color:#111;font-size:12px;}
+h1{margin:0 0 2px;font-size:17px;color:#1e3a5f;font-weight:800;}
+h2{margin:18px 0 6px;font-size:12px;color:#1e3a5f;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #1e3a5f;padding-bottom:3px;}
+table{width:100%;border-collapse:collapse;margin-bottom:6px;}
+th{background:#1e3a5f;color:#fff;padding:6px 8px;font-size:10px;font-weight:600;text-align:left;}
+tbody tr:nth-child(even){background:#f9fafb;}
+.info{display:flex;flex-wrap:wrap;gap:10px 18px;margin:8px 0 12px;padding:8px 12px;background:#eff6ff;border-radius:5px;font-size:10px;}
+.note{font-size:9.5px;padding:5px 10px;border-left:3px solid ${noteBord};margin-top:6px;line-height:1.5;color:${noteColor};background:${noteBg};}
+.foot{margin-top:20px;font-size:8.5px;color:#9ca3af;border-top:1px solid #e5e7eb;padding-top:6px;}
+@media print{body{padding:0;}@page{margin:1.5cm;size:A4;}}
+</style></head><body>
+<h1>Importacao de Servicos -- Calculo Tributario</h1>
+<div style="font-size:9px;color:#9ca3af;margin-bottom:4px;">Gerado em ${dataStr}</div>
+<div class="info">
+${form.desc?`<span><b>Ref.:</b> ${form.desc}</span>`:""}
+<span><b>Invoice:</b> ${form.val} ${form.moeda}</span>
+<span><b>Cot. Invoice:</b> R$ ${fN4(form.cotInv)}</span>
+<span><b>Cot. IRRF:</b> R$ ${fN4(form.cotIRRF||form.cotInv)}</span>
+<span><b>Base BRL:</b> ${fBRL(res.meta.brl)}</span>
+<span><b>Pais:</b> ${form.pais}</span>
+${res.meta.pi.fav?`<span style="color:#b45309;font-weight:700">Trib. Favorecida 25%</span>`:""}
+${res.meta.grossUp?`<span style="color:#6b21a8;font-weight:700">Gross Up IRRF</span>`:""}
+<span style="color:${noteColor};font-weight:700">${res.meta.parecer2026?"Parecer SEI/MF 1.129/2026":"IN 2.121/2022 art. 273"}</span>
+</div>
+<h2>Tributos Apurados</h2>
+<table><thead><tr>
+<th>Tributo</th><th style="text-align:right">Base de Calculo</th><th style="text-align:center">Aliquota</th>
+<th style="text-align:right">Valor Devido</th><th style="text-align:center">DARF</th><th>Base Legal</th>
+</tr></thead><tbody>${tribHTML}</tbody>
+<tfoot><tr style="background:#f0f9ff;border-top:2px solid #2563eb;">
+<td colspan="3" style="padding:7px 8px;font-weight:700;font-size:12px;">Total de Tributos</td>
+<td style="padding:7px 8px;font-weight:800;font-size:14px;text-align:right;color:#1d4ed8;">${fBRL(res.total)}</td>
+<td colspan="2"></td></tr></tfoot></table>
+<div class="note">${notaPC}</div>
+<h2>Memoria de Calculo</h2>
+<table><thead><tr><th style="width:42%">Descricao</th><th>Valor / Formula</th></tr></thead>
+<tbody>${memHTML}</tbody></table>
+<div class="foot">Ferramenta auxiliar — consulte um contador ou advogado tributarista para casos especificos.</div>
+</body></html>`;
+    const w = window.open("","_blank");
+    if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 600); }
+  };
 
   return (
     <div style={{display:"grid",gridTemplateColumns:"minmax(280px,390px) 1fr",gap:20,alignItems:"start"}}>
@@ -320,77 +302,69 @@ function TabCalc(props) {
         <p style={{margin:"0 0 14px",fontWeight:700,fontSize:14,color:"#111"}}>Dados da Invoice</p>
 
         <Field label="Descricao / Referencia">
-          <input style={sInp} value={form.desc} onChange={function(e){set("desc",e.target.value);}} placeholder="Opcional"/>
+          <input style={sInp} value={form.desc} onChange={e=>set("desc",e.target.value)} placeholder="Opcional"/>
         </Field>
 
         <div style={{display:"grid",gridTemplateColumns:"80px 1fr",gap:8}}>
           <Field label="Moeda">
-            <select style={sSel} value={form.moeda} onChange={function(e){set("moeda",e.target.value);}}>
-              {["USD","EUR","GBP","CHF","JPY","CAD","AUD","ARS","MXN","CNY","Outra"].map(function(m){ return <option key={m}>{m}</option>; })}
+            <select style={sSel} value={form.moeda} onChange={e=>set("moeda",e.target.value)}>
+              {["USD","EUR","GBP","CHF","JPY","CAD","AUD","ARS","MXN","CNY","Outra"].map(m=><option key={m}>{m}</option>)}
             </select>
           </Field>
-          <Field label={"Valor (" + form.moeda + ")"} err={errs.val}>
+          <Field label={`Valor (${form.moeda})`} err={errs.val}>
             <input style={errs.val?sInpErr:sInp} type="number" min="0" step="0.01"
-              value={form.val} onChange={function(e){set("val",e.target.value);}} placeholder="10.000,00"/>
+              value={form.val} onChange={e=>set("val",e.target.value)} placeholder="10.000,00"/>
           </Field>
         </div>
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Cotacao Invoice (R$)" hint="Base ISS, IOF, CIDE" err={errs.ci}>
             <input style={errs.ci?sInpErr:sInp} type="number" min="0" step="0.0001"
-              value={form.cotInv} onChange={function(e){set("cotInv",e.target.value);}} placeholder="5,2000"/>
+              value={form.cotInv} onChange={e=>set("cotInv",e.target.value)} placeholder="5,2000"/>
           </Field>
           <Field label="Cotacao IRRF (R$)" hint="Padrao = cotacao invoice">
             <input style={sInp} type="number" min="0" step="0.0001"
               value={form.cotIRRF} placeholder={form.cotInv||"5,2000"}
-              onChange={function(e){ setForm(function(f){ return Object.assign({},f,{cotIRRF:e.target.value,_irrfM:true}); }); }}/>
+              onChange={e=>setForm(f=>({...f,cotIRRF:e.target.value,_irrfM:true}))}/>
           </Field>
         </div>
 
         <Field label="Pais do Beneficiario / Prestador">
-          <select style={sSel} value={form.pais} onChange={function(e){set("pais",e.target.value);}}>
-            {PAISES.map(function(x){
-              return <option key={x.n} value={x.n}>{x.n}{x.fav?" -- 25% (trib. favorecida)":" -- 15%"}{x.trat?" / tratado":""}</option>;
-            })}
+          <select style={sSel} value={form.pais} onChange={e=>set("pais",e.target.value)}>
+            {PAISES.map(x=>(
+              <option key={x.n} value={x.n}>
+                {x.n}{x.fav?" -- 25% (trib. favorecida)":" -- 15%"}{x.trat?" / tratado":""}
+              </option>
+            ))}
           </select>
-          {pi && pi.fav && <p style={{margin:"4px 0 0",fontSize:11,color:"#b45309",fontWeight:500}}>Atencao: pais com tributacao favorecida -- IRRF 25% (IN RFB 1.037/2010 art. 1)</p>}
-          {pi && !pi.fav && pi.trat && <p style={{margin:"4px 0 0",fontSize:11,color:"#059669",fontWeight:500}}>Tratado para evitar dupla tributacao em vigor</p>}
+          {pi?.fav && <p style={{margin:"4px 0 0",fontSize:11,color:"#b45309",fontWeight:500}}>Atencao: pais com tributacao favorecida -- IRRF 25%</p>}
+          {!pi?.fav && pi?.trat && <p style={{margin:"4px 0 0",fontSize:11,color:"#059669",fontWeight:500}}>Tratado para evitar dupla tributacao em vigor</p>}
         </Field>
 
         <div style={{display:"grid",gridTemplateColumns:"130px 1fr",gap:8,marginBottom:4}}>
           <Field label="Aliquota ISS %" hint="Verificar lei municipal" err={errs.iss}>
             <input style={errs.iss?sInpErr:sInp} type="number" min="0" max="10" step="0.5"
-              value={form.alfISS} onChange={function(e){set("alfISS",e.target.value);}}/>
+              value={form.alfISS} onChange={e=>set("alfISS",e.target.value)}/>
           </Field>
         </div>
 
-        {/* Toggles */}
         <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:"10px 12px",marginBottom:12}}>
           <p style={{margin:"0 0 8px",fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:.4}}>Opcoes de Calculo</p>
-
           <div style={{marginBottom:10,paddingBottom:10,borderBottom:"1px solid #f0f0f0"}}>
             <Toggle
-              label="Seguir Parecer SEI/MF n. 1.129/2026"
-              bold={true}
-              checked={form.parecer2026}
-              onChange={function(){set("parecer2026",!form.parecer2026);}}
+              label="Seguir Parecer SEI/MF n. 1.129/2026" bold={true}
+              checked={form.parecer2026} onChange={()=>set("parecer2026",!form.parecer2026)}
               hint={form.parecer2026
-                ? "Fatos >= 09/06/2026: base PIS/COFINS = valor antes IRRF (sem fator Z = 1/(1-9,25%))"
+                ? "Fatos >= 09/06/2026: base PIS/COFINS = valor antes IRRF (sem fator Z)"
                 : "Fatos < 09/06/2026: base PIS/COFINS inclui proprias contribuicoes (IN 2.121/2022 art. 273)"}
             />
           </div>
-
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            <Toggle
-              label="Incide CIDE? (tecnologia, royalties, assist. tecnica)"
-              checked={form.cide}
-              onChange={function(){set("cide",!form.cide);}}
-            />
-            <Toggle
-              label="Aplicar Gross Up no IRRF?"
-              checked={form.grossUp}
-              onChange={function(){set("grossUp",!form.grossUp);}}
-              hint={form.grossUp && pi ? "Base IRRF = " + (form.cotIRRF||form.cotInv||"cot.") + " x Valor / (1 - " + fPCT(pi.alf) + ") -- tomador assume o imposto" : "Quando o tomador assume o onus do IRRF"}
+            <Toggle label="Incide CIDE? (tecnologia, royalties, assist. tecnica)"
+              checked={form.cide} onChange={()=>set("cide",!form.cide)}/>
+            <Toggle label="Aplicar Gross Up no IRRF?"
+              checked={form.grossUp} onChange={()=>set("grossUp",!form.grossUp)}
+              hint={form.grossUp&&pi?`Base IRRF = ${form.cotIRRF||form.cotInv||"cot."} x Valor / (1 - ${fPCT(pi.alf)}) -- tomador assume o imposto`:"Quando o tomador assume o onus do IRRF"}
             />
           </div>
         </div>
@@ -403,7 +377,6 @@ function TabCalc(props) {
       {/* RESULTADO */}
       {res ? (
         <div>
-          {/* Banner */}
           <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"9px 14px",marginBottom:10,fontSize:12,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
             {form.desc && <b>{form.desc}</b>}
             <span>Base BRL: <b>{fBRL(res.meta.brl)}</b></span>
@@ -415,7 +388,6 @@ function TabCalc(props) {
               : <span style={{background:"#dbeafe",padding:"2px 8px",borderRadius:4,color:"#1d4ed8",fontWeight:600}}>IN 2.121/2022 art. 273</span>}
           </div>
 
-          {/* Tabela */}
           <div style={{background:"#fff",borderRadius:10,border:"1px solid #e5e7eb",overflow:"hidden"}}>
             <div style={{background:"#1e3a5f",color:"#fff",padding:"10px 14px",display:"flex",justifyContent:"space-between"}}>
               <b style={{fontSize:13}}>Calculo dos Tributos</b>
@@ -425,19 +397,21 @@ function TabCalc(props) {
               <table style={{width:"100%",borderCollapse:"collapse",minWidth:600}}>
                 <thead>
                   <tr style={{background:"#f8fafc"}}>
-                    {["Tributo","Base de Calculo","Aliquota","Valor Devido","DARF","Base Legal"].map(function(h){
-                      var align = (h==="Base de Calculo"||h==="Valor Devido")?"right":(h==="Aliquota"||h==="DARF")?"center":"left";
-                      return <th key={h} style={{padding:"7px 10px",fontSize:11,fontWeight:600,color:"#6b7280",borderBottom:"1px solid #e5e7eb",whiteSpace:"nowrap",textAlign:align}}>{h}</th>;
-                    })}
+                    {["Tributo","Base de Calculo","Aliquota","Valor Devido","DARF","Base Legal"].map(h=>(
+                      <th key={h} style={{padding:"7px 10px",fontSize:11,fontWeight:600,color:"#6b7280",borderBottom:"1px solid #e5e7eb",whiteSpace:"nowrap",
+                        textAlign:["Base de Calculo","Valor Devido"].includes(h)?"right":["Aliquota","DARF"].includes(h)?"center":"left"}}>
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  <TRow nome="ISSQN"             base={res.ISS.base}    alf={res.ISS.alf}    val={res.ISS.val}    darf={res.ISS.darf}    lei={res.ISS.lei}              />
-                  <TRow nome="PIS-Importacao"    base={res.PIS.base}    alf={res.PIS.alf}    val={res.PIS.val}    darf={res.PIS.darf}    lei={res.PIS.lei}              />
-                  <TRow nome="COFINS-Importacao" base={res.COFINS.base} alf={res.COFINS.alf} val={res.COFINS.val} darf={res.COFINS.darf} lei={res.COFINS.lei}           />
-                  <TRow nome="IOF-Cambio"        base={res.IOF.base}    alf={res.IOF.alf}    val={res.IOF.val}    darf={res.IOF.darf}    lei={res.IOF.lei}              />
+                  <TRow nome="ISSQN"             base={res.ISS.base}    alf={res.ISS.alf}    val={res.ISS.val}    darf={res.ISS.darf}    lei={res.ISS.lei}             />
+                  <TRow nome="PIS-Importacao"    base={res.PIS.base}    alf={res.PIS.alf}    val={res.PIS.val}    darf={res.PIS.darf}    lei={res.PIS.lei}             />
+                  <TRow nome="COFINS-Importacao" base={res.COFINS.base} alf={res.COFINS.alf} val={res.COFINS.val} darf={res.COFINS.darf} lei={res.COFINS.lei}          />
+                  <TRow nome="IOF-Cambio"        base={res.IOF.base}    alf={res.IOF.alf}    val={res.IOF.val}    darf={res.IOF.darf}    lei={res.IOF.lei}             />
                   <TRow nome="CIDE-Tecnologia"   base={res.CIDE.base}   alf={res.CIDE.alf}   val={res.CIDE.val}   darf={res.CIDE.darf}   lei={res.CIDE.lei}  ni={res.CIDE.ni} />
-                  <TRow nome="IRRF"              base={res.IRRF.base}   alf={res.IRRF.alf}   val={res.IRRF.val}   darf={res.IRRF.darf}   lei={res.IRRF.lei}  hl={true}    />
+                  <TRow nome="IRRF"              base={res.IRRF.base}   alf={res.IRRF.alf}   val={res.IRRF.val}   darf={res.IRRF.darf}   lei={res.IRRF.lei}  hl={true} />
                 </tbody>
                 <tfoot>
                   <tr style={{background:"#f0f9ff",borderTop:"2px solid #2563eb"}}>
@@ -449,17 +423,16 @@ function TabCalc(props) {
               </table>
             </div>
             <div style={{padding:"8px 14px",borderTop:"1px solid #e5e7eb",fontSize:10.5,
-              background: res.meta.parecer2026?"#f0fdf4":"#eff6ff",
-              color:       res.meta.parecer2026?"#166534":"#1d4ed8"}}>
+              background:res.meta.parecer2026?"#f0fdf4":"#eff6ff",
+              color:      res.meta.parecer2026?"#166534":"#1d4ed8"}}>
               {res.meta.parecer2026
                 ? "Base PIS/COFINS: Parecer SEI/MF n. 1.129/2026 -- fatos a partir de 09/06/2026, nao integram a base o valor das proprias contribuicoes (fator Z nao aplicavel). Base = valor antes retencao IRRF."
-                : "Base PIS/COFINS: IN RFB 2.121/2022 art. 273 (Parecer SEI n. 4.891/2022) -- valor antes da retencao do IRRF acrescido das proprias contribuicoes. Formula: base = valor antes IRRF / (1 - 9,25%)."}
+                : "Base PIS/COFINS: IN RFB 2.121/2022 art. 273 -- valor antes da retencao do IRRF acrescido das proprias contribuicoes. Formula: base = valor antes IRRF / (1 - 9,25%)."}
             </div>
           </div>
 
-          {/* Botoes */}
           <div style={{display:"flex",gap:8,marginTop:8}}>
-            <button onClick={function(){setShowMem(function(v){return !v;});}} style={{flex:1,padding:8,background:"#f3f4f6",border:"1px solid #d1d5db",borderRadius:7,fontSize:12,cursor:"pointer",color:"#374151"}}>
+            <button onClick={()=>setShowMem(v=>!v)} style={{flex:1,padding:8,background:"#f3f4f6",border:"1px solid #d1d5db",borderRadius:7,fontSize:12,cursor:"pointer",color:"#374151"}}>
               {showMem?"Ocultar":"Ver"} Memoria de Calculo
             </button>
             <button onClick={gerarPDF} style={{padding:"8px 18px",background:"#dc2626",border:"none",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",color:"#fff",whiteSpace:"nowrap"}}>
@@ -467,45 +440,43 @@ function TabCalc(props) {
             </button>
           </div>
 
-          {/* Memoria */}
           {showMem && (
             <div style={{marginTop:6,background:"#fafafa",border:"1px solid #e5e7eb",borderRadius:8,padding:14,fontSize:11}}>
               <p style={{margin:"0 0 10px",fontWeight:700,fontSize:12}}>Memoria Detalhada</p>
               {[
-                ["Valor da Invoice",                       form.val + " " + form.moeda],
-                ["Cotacao Invoice",                         "R$ " + fN4(form.cotInv)],
-                ["Cotacao IRRF",                            "R$ " + fN4(form.cotIRRF || form.cotInv)],
-                ["Base BRL (invoice x cot. invoice)",      fBRL(res.meta.brl)],
-                ["Base BRL IRRF (invoice x cot. IRRF)",    fBRL(res.meta.brlI)],
-                ["Base IRRF / valor antes retencao",       res.meta.grossUp
-                  ? fBRL(res.meta.brlI) + " / (1 - " + fPCT(res.meta.pi.alf) + ") = " + fBRL(res.meta.baseI)
-                  : fBRL(res.meta.baseI) + "  (sem gross up)"],
-                ["Regra base PIS/COFINS",                  res.meta.parecer2026 ? "Parecer SEI/MF 1.129/2026 (sem fator Z)" : "IN 2.121/2022 art. 273 (com fator Z)"],
-                ["Base PIS/COFINS",                        res.meta.parecer2026
-                  ? fBRL(res.meta.basePC) + "  [= valor antes IRRF]"
-                  : fBRL(res.meta.basePC) + "  [= " + fBRL(res.meta.baseI) + " / 0,9075]"],
-                ["Pais / Aliquota IRRF",                   res.meta.pi.n + " -- " + fPCT(res.meta.pi.alf)],
-                ["Tributacao favorecida",                  res.meta.pi.fav?"Sim (IN RFB 1.037/2010)":"Nao"],
-                ["Tratado internacional",                  res.meta.pi.trat?"Sim -- em vigor":"Nao aplicavel"],
+                ["Valor da Invoice",                      form.val+" "+form.moeda],
+                ["Cotacao Invoice",                        "R$ "+fN4(form.cotInv)],
+                ["Cotacao IRRF",                           "R$ "+fN4(form.cotIRRF||form.cotInv)],
+                ["Base BRL (invoice x cot. invoice)",     fBRL(res.meta.brl)],
+                ["Base BRL IRRF (invoice x cot. IRRF)",   fBRL(res.meta.brlI)],
+                ["Base IRRF / valor antes retencao",      res.meta.grossUp
+                  ? fBRL(res.meta.brlI)+" / (1 - "+fPCT(res.meta.pi.alf)+") = "+fBRL(res.meta.baseI)
+                  : fBRL(res.meta.baseI)+"  (sem gross up)"],
+                ["Regra base PIS/COFINS",                 res.meta.parecer2026?"Parecer SEI/MF 1.129/2026 (sem fator Z)":"IN 2.121/2022 art. 273 (com fator Z)"],
+                ["Base PIS/COFINS",                       res.meta.parecer2026
+                  ? fBRL(res.meta.basePC)+"  [= valor antes IRRF]"
+                  : fBRL(res.meta.basePC)+"  [= "+fBRL(res.meta.baseI)+" / 0,9075]"],
+                ["Pais / Aliquota IRRF",                  res.meta.pi.n+" -- "+fPCT(res.meta.pi.alf)],
+                ["Tributacao favorecida",                 res.meta.pi.fav?"Sim (IN RFB 1.037/2010)":"Nao"],
+                ["Tratado internacional",                 res.meta.pi.trat?"Sim -- em vigor":"Nao aplicavel"],
                 ["sep"],
-                ["ISSQN",   fBRL(res.ISS.base) + " x " + fPCT(res.ISS.alf) + " = " + fBRL(res.ISS.val)],
-                ["PIS",     fBRL(res.PIS.base) + " x " + fPCT(TRIB.PIS.alf) + " = " + fBRL(res.PIS.val)],
-                ["COFINS",  fBRL(res.COFINS.base) + " x " + fPCT(TRIB.COFINS.alf) + " = " + fBRL(res.COFINS.val)],
-                ["IOF",     fBRL(res.IOF.base) + " x " + fPCT(TRIB.IOF.alf) + " = " + fBRL(res.IOF.val)],
-                ["CIDE",    res.CIDE.ni?"Nao incide":fBRL(res.CIDE.base)+" x "+fPCT(TRIB.CIDE.alf)+" = "+fBRL(res.CIDE.val)+"  [base = valor antes IRRF, SC COSIT 99/2018]"],
-                ["IRRF",    fBRL(res.IRRF.base) + " x " + fPCT(res.IRRF.alf) + " = " + fBRL(res.IRRF.val)],
+                ["ISSQN",   fBRL(res.ISS.base)+" x "+fPCT(res.ISS.alf)+" = "+fBRL(res.ISS.val)],
+                ["PIS",     fBRL(res.PIS.base)+" x "+fPCT(TRIB.PIS.alf)+" = "+fBRL(res.PIS.val)],
+                ["COFINS",  fBRL(res.COFINS.base)+" x "+fPCT(TRIB.COFINS.alf)+" = "+fBRL(res.COFINS.val)],
+                ["IOF",     fBRL(res.IOF.base)+" x "+fPCT(TRIB.IOF.alf)+" = "+fBRL(res.IOF.val)],
+                ["CIDE",    res.CIDE.ni?"Nao incide":fBRL(res.CIDE.base)+" x "+fPCT(TRIB.CIDE.alf)+" = "+fBRL(res.CIDE.val)],
+                ["IRRF",    fBRL(res.IRRF.base)+" x "+fPCT(res.IRRF.alf)+" = "+fBRL(res.IRRF.val)],
                 ["sep"],
                 ["TOTAL TRIBUTOS", fBRL(res.total)],
-              ].map(function(item,i){
-                if (item[0]==="sep") return <div key={i} style={{borderTop:"1px solid #e5e7eb",margin:"4px 0"}}/>;
-                var isTotal = item[0]==="TOTAL TRIBUTOS";
-                return (
-                  <div key={i} style={{display:"flex",gap:12,padding:"5px 6px",borderBottom:"1px solid #f0f0f0",background:isTotal?"#eff6ff":"transparent"}}>
-                    <span style={{color:"#6b7280",minWidth:"44%",fontWeight:isTotal?700:400}}>{item[0]}</span>
-                    <span style={{color:"#111",fontFamily:"monospace",fontWeight:isTotal?700:400}}>{item[1]}</span>
+              ].map((item,i) => item[0]==="sep"
+                ? <div key={i} style={{borderTop:"1px solid #e5e7eb",margin:"4px 0"}}/>
+                : (
+                  <div key={i} style={{display:"flex",gap:12,padding:"5px 6px",borderBottom:"1px solid #f0f0f0",background:item[0]==="TOTAL TRIBUTOS"?"#eff6ff":"transparent"}}>
+                    <span style={{color:"#6b7280",minWidth:"44%",fontWeight:item[0]==="TOTAL TRIBUTOS"?700:400}}>{item[0]}</span>
+                    <span style={{color:"#111",fontFamily:"monospace",fontWeight:item[0]==="TOTAL TRIBUTOS"?700:400}}>{item[1]}</span>
                   </div>
-                );
-              })}
+                )
+              )}
             </div>
           )}
         </div>
@@ -523,110 +494,91 @@ function TabCalc(props) {
 // TAB LOTE
 // ═══════════════════════════════════════════════════════════
 function TabLote() {
-  var rowsArr = useState([]);
-  var rows = rowsArr[0], setRows = rowsArr[1];
-  var erroArr = useState("");
-  var erro = erroArr[0], setErro = erroArr[1];
-  var fRef = useRef();
+  const [rows, setRows] = useState([]);
+  const [erro, setErro] = useState("");
+  const fRef = useRef();
 
-  function dlModelo() {
-    var ws = XLSX.utils.json_to_sheet([
+  const dlModelo = () => {
+    const ws = XLSX.utils.json_to_sheet([
       {"Descricao":"Servico de TI","Moeda":"USD","Valor Invoice":10000,"Cotacao Invoice":5.20,"Cotacao IRRF":5.20,"Pais":"Estados Unidos","Aliquota ISS %":2,"Incide CIDE":"Nao","Gross Up":"Nao","Parecer 1129/2026":"Sim"},
       {"Descricao":"Consultoria","Moeda":"EUR","Valor Invoice":5000,"Cotacao Invoice":5.65,"Cotacao IRRF":5.65,"Pais":"Alemanha","Aliquota ISS %":3,"Incide CIDE":"Sim","Gross Up":"Sim","Parecer 1129/2026":"Sim"},
       {"Descricao":"Royalties (pre-2026)","Moeda":"USD","Valor Invoice":20000,"Cotacao Invoice":5.10,"Cotacao IRRF":5.10,"Pais":"Ilhas Cayman","Aliquota ISS %":2,"Incide CIDE":"Sim","Gross Up":"Nao","Parecer 1129/2026":"Nao"},
     ]);
-    var wb = XLSX.utils.book_new();
+    const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Modelo");
     XLSX.writeFile(wb, "modelo_importacao_servicos.xlsx");
-  }
+  };
 
-  function importar(e) {
-    var file = e.target.files[0];
-    if (!file) return;
-    var rd = new FileReader();
-    rd.onload = function(ev) {
+  const importar = e => {
+    const file = e.target.files[0]; if (!file) return;
+    const rd = new FileReader();
+    rd.onload = ev => {
       try {
-        var wb   = XLSX.read(ev.target.result, {type:"binary"});
-        var data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-        var result = data.map(function(row,i) {
+        const wb   = XLSX.read(ev.target.result,{type:"binary"});
+        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        setRows(data.map((row,i) => {
           try {
-            var ci = +(row["Cotacao Invoice"]||row["Cotação Invoice"]||0);
-            var p26raw = String(row["Parecer 1129/2026"]||row["Parecer 1.129/2026"]||"sim");
-            var p = {
-              valorFX:     +(row["Valor Invoice"]||0),
-              cotInv:      ci,
-              cotIRRF:     +(row["Cotacao IRRF"]||row["Cotação IRRF"]||ci),
-              pais:        String(row["Pais"]||row["País"]||"Demais paises (regra residual)"),
-              alfISS:      +(row["Aliquota ISS %"]||row["Alíquota ISS %"]||2),
-              cide:        String(row["Incide CIDE"]||"").toLowerCase().startsWith("s"),
-              grossUp:     String(row["Gross Up"]||"").toLowerCase().startsWith("s"),
+            const ci = +(row["Cotacao Invoice"]||row["Cotação Invoice"]||0);
+            const p26raw = String(row["Parecer 1129/2026"]||row["Parecer 1.129/2026"]||"sim");
+            const p = {
+              valorFX: +(row["Valor Invoice"]||0),
+              cotInv:  ci,
+              cotIRRF: +(row["Cotacao IRRF"]||row["Cotação IRRF"]||ci),
+              pais:    String(row["Pais"]||row["País"]||"Demais paises (regra residual)"),
+              alfISS:  +(row["Aliquota ISS %"]||row["Alíquota ISS %"]||2),
+              cide:    String(row["Incide CIDE"]||"").toLowerCase().startsWith("s"),
+              grossUp: String(row["Gross Up"]||"").toLowerCase().startsWith("s"),
               parecer2026: !p26raw.toLowerCase().startsWith("n"),
             };
             if (!p.valorFX||!p.cotInv) throw new Error("Valor Invoice e Cotacao Invoice sao obrigatorios");
-            var r = calcular(p);
+            const r = calcular(p);
             return { desc:String(row["Descricao"]||row["Descrição"]||""), pais:p.pais, p26:p.parecer2026, _ok:true, _r:r, _i:i+1 };
           } catch(ex) {
             return { desc:String(row["Descricao"]||row["Descrição"]||""), _ok:false, _err:ex.message, _i:i+1 };
           }
-        });
-        setRows(result);
+        }));
         setErro("");
-      } catch(ex2) {
-        setErro("Nao foi possivel ler o arquivo. Use o modelo fornecido.");
-      }
+      } catch(ex2) { setErro("Nao foi possivel ler o arquivo. Use o modelo fornecido."); }
     };
     rd.readAsBinaryString(file);
     e.target.value = "";
-  }
+  };
 
-  function exportar() {
-    var data = rows.filter(function(r){return r._ok;}).map(function(r){
-      return {
-        "Descricao":        r.desc,
-        "Pais":             r.pais,
-        "Parecer 1129/2026": r.p26?"Sim":"Nao",
-        "Valor BRL":        +r._r.meta.brl.toFixed(2),
-        "ISSQN":            +r._r.ISS.val.toFixed(2),
-        "PIS":              +r._r.PIS.val.toFixed(2),
-        "COFINS":           +r._r.COFINS.val.toFixed(2),
-        "IOF":              +r._r.IOF.val.toFixed(2),
-        "CIDE":             +r._r.CIDE.val.toFixed(2),
-        "IRRF":             +r._r.IRRF.val.toFixed(2),
-        "Total Tributos":   +r._r.total.toFixed(2),
-        "Aliq. IRRF":       fPCT(r._r.IRRF.alf),
-        "Trib. Favorecida": r._r.meta.pi.fav?"Sim":"Nao",
-      };
-    });
-    var ws = XLSX.utils.json_to_sheet(data);
-    var wb = XLSX.utils.book_new();
+  const exportar = () => {
+    const ws = XLSX.utils.json_to_sheet(rows.filter(r=>r._ok).map(r=>({
+      "Descricao":r.desc,"Pais":r.pais,"Parecer 1129/2026":r.p26?"Sim":"Nao",
+      "Valor BRL":+r._r.meta.brl.toFixed(2),"ISSQN":+r._r.ISS.val.toFixed(2),
+      "PIS":+r._r.PIS.val.toFixed(2),"COFINS":+r._r.COFINS.val.toFixed(2),
+      "IOF":+r._r.IOF.val.toFixed(2),"CIDE":+r._r.CIDE.val.toFixed(2),
+      "IRRF":+r._r.IRRF.val.toFixed(2),"Total Tributos":+r._r.total.toFixed(2),
+      "Aliq. IRRF":fPCT(r._r.IRRF.alf),"Trib. Favorecida":r._r.meta.pi.fav?"Sim":"Nao",
+    })));
+    const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Resultados");
     XLSX.writeFile(wb, "resultados_importacao_servicos.xlsx");
-  }
+  };
 
-  var ok = rows.filter(function(r){return r._ok;});
-  var T = {brl:0,iss:0,pis:0,cof:0,iof:0,cide:0,irrf:0,tot:0};
-  for (var i=0; i<ok.length; i++) {
-    T.brl+=ok[i]._r.meta.brl; T.iss+=ok[i]._r.ISS.val; T.pis+=ok[i]._r.PIS.val;
-    T.cof+=ok[i]._r.COFINS.val; T.iof+=ok[i]._r.IOF.val; T.cide+=ok[i]._r.CIDE.val;
-    T.irrf+=ok[i]._r.IRRF.val; T.tot+=ok[i]._r.total;
-  }
+  const ok = rows.filter(r=>r._ok);
+  const T = ok.reduce((a,r)=>({
+    brl:a.brl+r._r.meta.brl, iss:a.iss+r._r.ISS.val, pis:a.pis+r._r.PIS.val,
+    cof:a.cof+r._r.COFINS.val, iof:a.iof+r._r.IOF.val, cide:a.cide+r._r.CIDE.val,
+    irrf:a.irrf+r._r.IRRF.val, tot:a.tot+r._r.total,
+  }),{brl:0,iss:0,pis:0,cof:0,iof:0,cide:0,irrf:0,tot:0});
 
   return (
     <div>
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
         <button onClick={dlModelo} style={sBtn("#059669")}>Baixar Modelo Excel</button>
-        <button onClick={function(){fRef.current.click();}} style={sBtn("#2563eb")}>Importar Planilha</button>
+        <button onClick={()=>fRef.current.click()} style={sBtn("#2563eb")}>Importar Planilha</button>
         {ok.length>0 && <button onClick={exportar} style={sBtn("#7c3aed")}>Exportar Excel</button>}
         <input ref={fRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importar}/>
       </div>
-
       {erro && <div style={{padding:"10px 14px",background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:6,color:"#991b1b",fontSize:13,marginBottom:10}}>{erro}</div>}
-
       {rows.length===0 ? (
         <div style={{border:"2px dashed #e5e7eb",borderRadius:10,padding:40,textAlign:"center",color:"#9ca3af",background:"#f9fafb"}}>
           <div style={{fontSize:36,marginBottom:8}}>&#x1F4CB;</div>
           <p style={{margin:"0 0 8px",fontWeight:600,fontSize:14,color:"#374151"}}>Processamento em Lote</p>
-          <p style={{margin:"0 0 12px",fontSize:13}}>1. Baixe o modelo  2. Preencha suas invoices  3. Importe</p>
+          <p style={{margin:"0 0 12px",fontSize:13}}>1. Baixe o modelo &nbsp; 2. Preencha suas invoices &nbsp; 3. Importe</p>
           <div style={{display:"inline-block",background:"#fff",border:"1px solid #e5e7eb",borderRadius:6,padding:"8px 14px",textAlign:"left",fontSize:11,color:"#555"}}>
             <b>Obrigatorias:</b> Valor Invoice, Cotacao Invoice, Pais<br/>
             <b>Opcionais:</b> Descricao, Cotacao IRRF, Aliquota ISS %, Incide CIDE, Gross Up, Parecer 1129/2026
@@ -638,44 +590,39 @@ function TabLote() {
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:860}}>
               <thead>
                 <tr style={{background:"#1e3a5f",color:"#fff"}}>
-                  {["#","Descricao","Pais","Regra","Base BRL","ISS","PIS","COFINS","IOF","CIDE","IRRF","Total",""].map(function(h){
-                    var al = ["Descricao","Pais","Regra",""].indexOf(h)>=0?"left":"right";
-                    return <th key={h} style={{padding:"8px",fontWeight:600,whiteSpace:"nowrap",textAlign:al}}>{h}</th>;
-                  })}
+                  {["#","Descricao","Pais","Regra","Base BRL","ISS","PIS","COFINS","IOF","CIDE","IRRF","Total",""].map(h=>(
+                    <th key={h} style={{padding:"8px",fontWeight:600,whiteSpace:"nowrap",textAlign:["Descricao","Pais","Regra",""].includes(h)?"left":"right"}}>{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map(function(row){
-                  return (
-                    <tr key={row._i} style={{borderBottom:"1px solid #f0f0f0",background:row._i%2===0?"#f9fafb":"#fff"}}>
-                      <td style={{padding:"6px 8px",textAlign:"right",color:"#9ca3af"}}>{row._i}</td>
-                      <td style={{padding:"6px 8px",maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.desc||"--"}</td>
-                      {row._ok ? (
-                        <React.Fragment>
-                          <td style={{padding:"6px 8px",fontSize:10,color:"#555",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                            {row.pais}{row._r.meta.pi.fav?" (!)":""}
-                          </td>
-                          <td style={{padding:"6px 8px",fontSize:10}}>
-                            <span style={{background:row.p26?"#dcfce7":"#dbeafe",color:row.p26?"#166534":"#1d4ed8",padding:"1px 5px",borderRadius:4,fontWeight:600,whiteSpace:"nowrap"}}>
-                              {row.p26?"P.1129":"2.121"}
-                            </span>
-                          </td>
-                          <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.meta.brl)}</td>
-                          <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.ISS.val)}</td>
-                          <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.PIS.val)}</td>
-                          <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.COFINS.val)}</td>
-                          <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.IOF.val)}</td>
-                          <td style={{padding:"6px 8px",textAlign:"right"}}>{row._r.CIDE.ni?"--":fBRL(row._r.CIDE.val)}</td>
-                          <td style={{padding:"6px 8px",textAlign:"right",fontWeight:600}}>{fBRL(row._r.IRRF.val)}</td>
-                          <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700,color:"#1d4ed8"}}>{fBRL(row._r.total)}</td>
-                          <td style={{padding:"6px 8px"}}><span style={{background:"#d1fae5",color:"#065f46",padding:"2px 6px",borderRadius:8,fontSize:10,fontWeight:600}}>OK</span></td>
-                        </React.Fragment>
-                      ) : (
-                        <td colSpan={11} style={{padding:"6px 8px",color:"#ef4444"}}>Erro: {row._err}</td>
-                      )}
-                    </tr>
-                  );
-                })}
+                {rows.map(row=>(
+                  <tr key={row._i} style={{borderBottom:"1px solid #f0f0f0",background:row._i%2===0?"#f9fafb":"#fff"}}>
+                    <td style={{padding:"6px 8px",textAlign:"right",color:"#9ca3af"}}>{row._i}</td>
+                    <td style={{padding:"6px 8px",maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.desc||"--"}</td>
+                    {row._ok ? (
+                      <React.Fragment>
+                        <td style={{padding:"6px 8px",fontSize:10,color:"#555",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pais}{row._r.meta.pi.fav?" (!)":""}</td>
+                        <td style={{padding:"6px 8px"}}>
+                          <span style={{background:row.p26?"#dcfce7":"#dbeafe",color:row.p26?"#166534":"#1d4ed8",padding:"1px 5px",borderRadius:4,fontWeight:600,fontSize:10,whiteSpace:"nowrap"}}>
+                            {row.p26?"P.1129":"2.121"}
+                          </span>
+                        </td>
+                        <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.meta.brl)}</td>
+                        <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.ISS.val)}</td>
+                        <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.PIS.val)}</td>
+                        <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.COFINS.val)}</td>
+                        <td style={{padding:"6px 8px",textAlign:"right"}}>{fBRL(row._r.IOF.val)}</td>
+                        <td style={{padding:"6px 8px",textAlign:"right"}}>{row._r.CIDE.ni?"--":fBRL(row._r.CIDE.val)}</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",fontWeight:600}}>{fBRL(row._r.IRRF.val)}</td>
+                        <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700,color:"#1d4ed8"}}>{fBRL(row._r.total)}</td>
+                        <td style={{padding:"6px 8px"}}><span style={{background:"#d1fae5",color:"#065f46",padding:"2px 6px",borderRadius:8,fontSize:10,fontWeight:600}}>OK</span></td>
+                      </React.Fragment>
+                    ) : (
+                      <td colSpan={11} style={{padding:"6px 8px",color:"#ef4444"}}>Erro: {row._err}</td>
+                    )}
+                  </tr>
+                ))}
               </tbody>
               {ok.length>1 && (
                 <tfoot>
@@ -704,43 +651,44 @@ function TabLote() {
 // ═══════════════════════════════════════════════════════════
 // APP ROOT
 // ═══════════════════════════════════════════════════════════
-export default function App() {
-  var tabArr  = useState("calc");
-  var tab = tabArr[0], setTab = tabArr[1];
-  var formArr = useState({
+function App() {
+  const [tab,  setTab]  = useState("calc");
+  const [form, setForm] = useState({
     desc:"", moeda:"USD", val:"", cotInv:"", cotIRRF:"",
     pais:"Estados Unidos", alfISS:"2",
     cide:false, grossUp:false, parecer2026:true, _irrfM:false,
   });
-  var form = formArr[0], setForm = formArr[1];
-  var resArr = useState(null);
-  var res = resArr[0], setRes = resArr[1];
+  const [res, setRes] = useState(null);
 
   return (
     <div style={{fontFamily:"system-ui,-apple-system,sans-serif",maxWidth:1150,margin:"0 auto",padding:"0 14px 40px",background:"#f8fafc",minHeight:"100vh"}}>
       <div style={{background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)",color:"#fff",padding:"14px 20px",borderRadius:"0 0 14px 14px",marginBottom:20,boxShadow:"0 4px 12px rgba(29,78,216,.2)"}}>
-        <h1 style={{margin:0,fontSize:17,fontWeight:800,letterSpacing:-.2}}>Importacao de Servicos -- Calculadora Tributaria</h1>
-        <p style={{margin:"4px 0 0",fontSize:11.5,opacity:.85}}>ISSQN / PIS-Importacao / COFINS-Importacao / IRRF / IOF-Cambio / CIDE | Legislacao Brasileira Vigente</p>
+        <h1 style={{margin:0,fontSize:17,fontWeight:800}}>Importacao de Servicos &mdash; Calculadora Tributaria</h1>
+        <p style={{margin:"4px 0 0",fontSize:11.5,opacity:.85}}>ISSQN / PIS-Importacao / COFINS-Importacao / IRRF / IOF-Cambio / CIDE &nbsp;|&nbsp; Legislacao Brasileira Vigente</p>
       </div>
 
       <div style={{display:"flex",borderBottom:"2px solid #e5e7eb",marginBottom:20}}>
-        {[["calc","Calculadora"],["lote","Processamento em Lote"]].map(function(item){
-          return (
-            <button key={item[0]} onClick={function(){setTab(item[0]);}} style={{
-              padding:"9px 22px",border:"none",background:"none",cursor:"pointer",fontSize:13,
-              fontWeight:tab===item[0]?700:500,color:tab===item[0]?"#1d4ed8":"#6b7280",
-              borderBottom:tab===item[0]?"3px solid #1d4ed8":"3px solid transparent",marginBottom:-2,
-            }}>{item[1]}</button>
-          );
-        })}
+        {[["calc","Calculadora"],["lote","Processamento em Lote"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setTab(k)} style={{
+            padding:"9px 22px",border:"none",background:"none",cursor:"pointer",fontSize:13,
+            fontWeight:tab===k?700:500,color:tab===k?"#1d4ed8":"#6b7280",
+            borderBottom:tab===k?"3px solid #1d4ed8":"3px solid transparent",marginBottom:-2,
+          }}>{l}</button>
+        ))}
       </div>
 
       {tab==="calc" && <TabCalc form={form} setForm={setForm} res={res} setRes={setRes}/>}
       {tab==="lote" && <TabLote/>}
 
       <p style={{marginTop:28,textAlign:"center",fontSize:10.5,color:"#9ca3af"}}>
-        Ferramenta auxiliar -- consulte um contador ou advogado tributarista para casos especificos. | Aliquotas: PIS 1,65% / COFINS 7,60% / IOF 0,38% / CIDE 10% / IRRF conforme pais (IN RFB 1.037/2010)
+        Ferramenta auxiliar &mdash; consulte um contador ou advogado tributarista para casos especificos. &nbsp;|&nbsp;
+        PIS 1,65% / COFINS 7,60% / IOF 0,38% / CIDE 10% / IRRF conforme pais (IN RFB 1.037/2010)
       </p>
     </div>
   );
 }
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
